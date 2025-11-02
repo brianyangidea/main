@@ -52,50 +52,53 @@ def get_first_of_month_prices(ticker: str):
     # Add values to array
     raw_stock_array.append([ticker, dates, prices])
 
-    # Print values
-    print(f"\n📈 {ticker} — First Trading Day Prices (Past Year)\n")
-    for d, p in zip(dates, prices):
-        print(f"{d}: {p}")
-
-    print(f"\n➡️ Price array for {ticker}:")
-    print(prices)
-
     return prices
 
-def draw_line_graph(data, title="Line Graph", xlabel="Index", ylabel="Price of Stock (In USD)"):
+
+def draw_line_graph(data_arrays, labels, title: str, xlabel: str, ylabel: str):
     """
-    Draws a line graph from an array of floats.
+    Plots multiple lines on a single graph.
+    
+    Parameters:
+    - data_arrays: List of lists of floats. Each sub-list is one line.
+    - labels: Optional list of labels for each line.
+    - title: Title of the graph.
+    - xlabel: Label for the X-axis.
+    - ylabel: Label for the Y-axis.
     """
-    if not data:
-        print("No data to plot.")
+
+    if not data_arrays:
+        print("No data provided.")
         return
 
-    # Generate x-axis indices (0, 1, 2, ...)
-    x = list(range(len(data)))
+    num_lines = len(data_arrays)
 
-    # Create the line plot
-    plt.figure(figsize=(8, 5))
-    plt.plot(x, data, marker='o', linestyle='-', color='b', linewidth=2, markersize=6)
+    # If no labels provided, generate default ones
+    if labels is None or len(labels) != num_lines:
+        labels = [f"Line {i+1}" for i in range(num_lines)]
 
-    # Add labels and title
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+    plt.figure(figsize=(10, 6))
 
-    # Optional: Add grid and show the values on each point
-    plt.grid(True)
-    for i, v in enumerate(data):
-        plt.text(i, v, f"{v:.2f}", ha='center', va='bottom', fontsize=8)
+    for i, values in enumerate(data_arrays):
+        x = list(range(len(values)))  # X-axis indices
+        plt.plot(x, values, marker='o', linestyle='-', linewidth=2, markersize=6, label=labels[i])
+        # Optionally show values above each point
+        for xi, val in enumerate(values):
+            plt.text(xi, val, f"{val:.2f}", ha='center', va='bottom', fontsize=8)
 
-    # Display the graph
+    plt.title(title, fontsize=14)
+    plt.xlabel(xlabel, fontsize=12)
+    plt.ylabel(ylabel, fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
     plt.tight_layout()
     plt.show()
 
 
 
 if __name__ == "__main__":
-    # Example usage: fetch prices for Apple, Tesla, and Google
-    tickers = ["AAPL", "TSLA", "GOOG"]
+    # Example usage: fetch prices for Apple, Amazon, Google, and NVIDIA Corp
+    tickers = ["AAPL", "AMZN", "GOOG", "NVDA"]
 
     for t in tickers:
         get_first_of_month_prices(t)
@@ -111,10 +114,13 @@ if __name__ == "__main__":
             price_list.append(floated_price_value)
         stock_array.append([raw_stock_array[i][0],price_list])
 
-print(stock_array[0][0])
-print(stock_array[0][1])
+    # Data for the line graph (Last 12 months of stocks for 4 chosen companies)
+    line1 = stock_array[0][1]
+    line2 = stock_array[1][1]
+    line3 = stock_array[2][1]
+    line4 = stock_array[3][1]
 
+    data = [line1, line2, line3, line4]
+    labels = ["Apple (AAPL)", "Amazon (AMZN)", "Alphabet Inc. (GOOG)", "NVIDIA Corp (NVDA)"]
 
-if __name__ == "__main__":
-    # Example array of floats (e.g., monthly stock prices)
-    draw_line_graph(stock_array[0][1])
+    draw_line_graph(data, labels=labels, title="Stock Prices Comparison For The Last Year", xlabel="Last 12 Months", ylabel="Price of Stock (In USD)")
