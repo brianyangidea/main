@@ -216,6 +216,9 @@ class GameScreen(Screen):
         self.player_color = (0, 100, 255)
         # Customizable player name
         self.player_name = "The Hero"
+        # Player health persists between battles
+        self.player_max_health = 50
+        self.player_health = self.player_max_health
         
         # Movement tracking (for smooth grid-based movement)
         self.can_move = True
@@ -263,6 +266,12 @@ class GameScreen(Screen):
         self.spawn_interval = 600  # frames between spawn attempts (~10s at 60fps)
         self.max_enemies = 8  # cap total enemies on the map
 
+        # Single healing pickup that spawns periodically
+        self.pickup = None  # dict with x,y,dx,dy,move_timer
+        self.pickup_spawn_timer = 0
+        self.pickup_spawn_interval = 600  # ~5 seconds at 60fps
+        self.pickup_heal_amount = 5
+
     def spawn_enemy(self):
         """Attempt to spawn a new enemy at a random free grid tile."""
         if len(self.enemies) >= self.max_enemies:
@@ -309,6 +318,43 @@ class GameScreen(Screen):
             return
         # if we exit loop, couldn't find a spot this tick; just skip
 
+    def spawn_pickup(self):
+        """Spawn a single healing pickup at a free random grid tile."""
+        if self.pickup is not None:
+            return
+
+        attempts = 0
+        while attempts < 100:
+            rx = random.randint(0, self.grid_width - 1)
+            ry = random.randint(0, self.grid_height - 1)
+            # avoid spawning on player
+            if rx == self.player_x and ry == self.player_y:
+                attempts += 1
+                continue
+            collision = False
+            for e in self.enemies:
+                if e['x'] == rx and e['y'] == ry:
+                    collision = True
+                    break
+            if collision:
+                attempts += 1
+                continue
+
+            # place pickup
+            dx = random.choice([-1, 0, 1])
+            dy = random.choice([-1, 0, 1])
+            if dx == 0 and dy == 0:
+                dx = 1
+            self.pickup = {
+                'x': rx,
+                'y': ry,
+                'dx': dx,
+                'dy': dy,
+                'move_timer': random.randint(12, 30)
+            }
+            return
+        # couldn't find a spot this tick
+
     def update(self):
         # Update enemies movement
         for e in self.enemies:
@@ -343,9 +389,11 @@ class GameScreen(Screen):
                 # pass a reference to this GameScreen and the enemy index so BattleScreen
                 # can remove the enemy when defeated and return to the map
                 enemy_index = self.enemies.index(e)
+                # pass the current player health so it persists across battles
                 self.manager.go_to(BattleScreen(
                     self.manager,
-                    player_health=50,
+                    player_health=self.player_health,
+                    player_max_health=self.player_max_health,
                     player_damage=15,
                     player_heal=10,
                     enemy_health=e['hp'],
@@ -366,6 +414,49 @@ class GameScreen(Screen):
             self.spawn_timer = self.spawn_interval
         else:
             self.spawn_timer -= 1
+
+        # Handle pickup spawn timer
+        if self.pickup_spawn_timer <= 0:
+            if self.pickup is None:
+                self.spawn_pickup()
+            self.pickup_spawn_timer = self.pickup_spawn_interval
+        else:
+            self.pickup_spawn_timer -= 1
+
+        # Update pickup movement and check for pickup by player
+        if self.pickup is not None:
+            p = self.pickup
+            p['move_timer'] -= 1
+            if p['move_timer'] <= 0:
+                new_x = p['x'] + p['dx']
+                new_y = p['y'] + p['dy']
+                # if out of bounds, pick a new direction
+                if new_x < 0 or new_x >= self.grid_width or new_y < 0 or new_y >= self.grid_height:
+                    p['dx'] = random.choice([-1, 0, 1])
+                    p['dy'] = random.choice([-1, 0, 1])
+                    if p['dx'] == 0 and p['dy'] == 0:
+                        p['dx'] = 1
+                    p['move_timer'] = random.randint(12, 30)
+                else:
+                    p['x'] = new_x
+                    p['y'] = new_y
+                    # occasionally change direction
+                    if random.random() < 0.2:
+                        p['dx'] = random.choice([-1, 0, 1])
+                        p['dy'] = random.choice([-1, 0, 1])
+                        if p['dx'] == 0 and p['dy'] == 0:
+                            p['dx'] = 1
+                    p['move_timer'] = random.randint(12, 30)
+
+            # Check for pickup collision with player
+            if p['x'] == self.player_x and p['y'] == self.player_y:
+                # Heal the player
+                try:
+                    self.player_health = min(self.player_max_health, self.player_health + self.pickup_heal_amount)
+                except Exception:
+                    pass
+                # remove pickup
+                self.pickup = None
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and self.can_move:
@@ -412,6 +503,16 @@ class GameScreen(Screen):
                 pygame.draw.rect(surface, (100, 100, 40), er)
             surface.blit(name_text, (ex_screen + 6, ey_screen + 6))
 
+        # Draw pickup if present (green square, same size as enemies)
+        if self.pickup is not None:
+            px_screen = self.pickup['x'] * self.grid_size
+            py_screen = self.pickup['y'] * self.grid_size
+            pr = pygame.Rect(px_screen + 4, py_screen + 4, self.grid_size - 8, self.grid_size - 8)
+            pygame.draw.rect(surface, (50, 220, 80), pr)
+            # small label
+            pickup_text = font_supersmall.render("HEAL", True, WHITE)
+            surface.blit(pickup_text, (px_screen + 6, py_screen + 6))
+
         # Draw player character (as a square)
         player_screen_x = self.player_x * self.grid_size
         player_screen_y = self.player_y * self.grid_size
@@ -422,6 +523,29 @@ class GameScreen(Screen):
         # Draw instructions
         info = font_verysmall.render("Use arrow keys to move - ESC to return to menu", True, WHITE)
         surface.blit(info, (10, 10))
+        
+        # Draw player health bar on the map (top-left)
+        try:
+            bar_x = 10
+            bar_y = 55
+            bar_w = 200
+            bar_h = 18
+            # Background (empty)
+            pygame.draw.rect(surface, (120, 0, 0), (bar_x, bar_y, bar_w, bar_h))
+            # Foreground (current health)
+            if hasattr(self, 'player_max_health') and self.player_max_health > 0:
+                health_ratio = max(0.0, min(1.0, self.player_health / self.player_max_health))
+            else:
+                health_ratio = 1.0
+            pygame.draw.rect(surface, (0, 200, 0), (bar_x, bar_y, int(bar_w * health_ratio), bar_h))
+            # Border
+            pygame.draw.rect(surface, WHITE, (bar_x, bar_y, bar_w, bar_h), 2)
+            # Text
+            health_text = font_verysmall.render(f"HP: {max(0, int(self.player_health))}/{int(self.player_max_health)}", True, WHITE)
+            surface.blit(health_text, (bar_x + 6, bar_y - 18))
+        except Exception:
+            # If player health attributes aren't present for some reason, silently skip
+            pass
 
 
 # Button class for UI
@@ -450,7 +574,7 @@ class Button:
 
 # Battle Screen
 class BattleScreen(Screen):
-    def __init__(self, manager, player_health=50, player_damage=15, player_heal=10,
+    def __init__(self, manager, player_health=50, player_max_health=50, player_damage=15, player_heal=10,
                  enemy_health=50, enemy_damage=6, enemy_heal=12, is_boss=False,
                  origin_screen=None, origin_enemy_index=None, player_name=None, enemy_name=None):
         super().__init__(manager)
@@ -460,8 +584,8 @@ class BattleScreen(Screen):
         else:
             self.soundtrack = play_mp3("royalty_free_music/Palismanto_Battle.mp3", volume=80)
         
-        # Customizable stats
-        self.player_max_health = player_health
+        # Customizable stats (accept passed max health)
+        self.player_max_health = player_max_health if player_max_health is not None else player_health
         self.enemy_max_health = enemy_health
         self.player_damage = player_damage
         self.player_heal_amount = player_heal
@@ -470,9 +594,9 @@ class BattleScreen(Screen):
         # Names
         self.player_name = player_name if player_name is not None else "Player"
         self.enemy_name = enemy_name if enemy_name is not None else "Enemy"
-        
-        # Current health
-        self.player_health = player_health
+
+        # Current health (start from passed current values)
+        self.player_health = min(player_health, self.player_max_health)
         self.enemy_health = enemy_health
         
         # Battle state
@@ -481,6 +605,9 @@ class BattleScreen(Screen):
         self.action_timer = 0
         self.battle_over = False
         self.winner = None
+        # Limit how many times player can use HEAL in this battle
+        self.max_heal_uses = 3
+        self.heal_uses = 0
         # Optional origin info: where to return and which enemy to remove on victory
         self.origin_screen = origin_screen
         self.origin_enemy_index = origin_enemy_index
@@ -514,8 +641,15 @@ class BattleScreen(Screen):
     
     def perform_player_heal(self):
         """Player heals themselves"""
+        # Check heal usage limit
+        if self.heal_uses >= self.max_heal_uses:
+            self.battle_log = "You can't heal anymore! No healing potions left."
+            self.action_timer = 90
+            return
+
         self.player_health = min(self.player_health + self.player_heal_amount, self.player_max_health)
-        self.battle_log = f"You healed for {self.player_heal_amount} HP!"
+        self.heal_uses += 1
+        self.battle_log = f"You healed for {self.player_heal_amount} HP! ({self.max_heal_uses - self.heal_uses} heals left)"
         self.action_timer = 180
         self.player_turn = False
 
@@ -546,6 +680,13 @@ class BattleScreen(Screen):
             self.battle_over = True
             self.winner = "Enemy"
             self.battle_log = f"{self.player_name} has been defeated! Press ESC to return."
+            # Persist player health back to origin screen if provided
+            if self.origin_screen is not None:
+                try:
+                    # Player is at 0 or less
+                    self.origin_screen.player_health = max(0, self.player_health)
+                except Exception:
+                    pass
         elif self.enemy_health <= 0:
             self.battle_over = True
             self.winner = "Player"
@@ -563,6 +704,14 @@ class BattleScreen(Screen):
                     # place the player at the enemy's former position
                     self.origin_screen.player_x = enemy_pos_x
                     self.origin_screen.player_y = enemy_pos_y
+                    # Persist updated player health back to origin screen
+                    try:
+                        self.origin_screen.player_health = max(0, self.player_health)
+                        # also update max if needed
+                        if hasattr(self.origin_screen, 'player_max_health'):
+                            self.origin_screen.player_max_health = self.player_max_health
+                    except Exception:
+                        pass
                     self.soundtrack.stop()
                     self.origin_screen.soundtrack = play_mp3("royalty_free_music/Palismanto_Adventure.mp3", volume=80)
                     # switch back to the origin screen
