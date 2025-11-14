@@ -8,7 +8,7 @@ import time
 from screens.screens import ScreenManager
 
 # Screen setup
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 640, 500
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption('Palismanto: A D&D-Inspired Card Battling Game')
 pygame.mouse.set_visible(False)

@@ -10,7 +10,7 @@ import math
 pygame.init()
 
 # Screen setup
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 640, 500
 
 # Colours
 WHITE = (255, 255, 255)
@@ -104,7 +104,7 @@ class TitleScreen(Screen):
                 self.soundtrack.stop()
                 self.soundtrack = play_mp3("royalty_free_music/Palismanto_Stinger.mp3", volume=80)
                 time.sleep(2.2)
-                self.manager.go_to(GameScreen(self.manager))
+                self.manager.go_to(MainMenuScreen(self.manager))
 
     def draw(self, surface):
         surface.fill(WHITE)
@@ -125,8 +125,8 @@ class TitleScreen(Screen):
     # (squares already drawn behind UI)
 
 
-# Game Screen
-class GameScreen(Screen):
+# Main Menu Screen
+class MainMenuScreen(Screen):
     def __init__(self, manager):
         super().__init__(manager)
         self.soundtrack = play_mp3("royalty_free_music/Palismanto_Menu.mp3", volume=80)
@@ -152,6 +152,12 @@ class GameScreen(Screen):
         self.bar_time += 0.06
 
     def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+            self.manager.go_to(GameScreen(self.manager))  # Go to the game screen
+            self.soundtrack.stop()
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+            self.manager.go_to(BattleScreen(self.manager))  # Go to the battle screen
+            self.soundtrack.stop()
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.manager.go_to(TitleScreen(self.manager))  # Go back to title
             self.soundtrack.stop()
@@ -187,6 +193,408 @@ class GameScreen(Screen):
             pygame.draw.rect(surface, bar['color'], rect)
 
 
+# Game Screen
+class GameScreen(Screen):
+    def __init__(self, manager):
+        super().__init__(manager)
+        self.soundtrack = play_mp3("royalty_free_music/Palismanto_Adventure.mp3", volume=80)
+        
+        # Grid setup
+        self.grid_size = 40  # Size of each grid cell in pixels
+        self.grid_width = WIDTH // self.grid_size
+        self.grid_height = HEIGHT // self.grid_size
+        
+        # Player setup
+        self.player_x = self.grid_width // 2  # Start in center (grid coordinates)
+        self.player_y = self.grid_height // 2
+        self.player_color = (0, 100, 255)
+        
+        # Movement tracking (for smooth grid-based movement)
+        self.can_move = True
+
+        # Enemies: three red squares with their own stats
+        # Each enemy uses grid coords (x,y) and moves every few frames
+        self.enemies = []
+        # Example per-enemy stats (health, damage, heal). Tweak as desired.
+        enemy_templates = [
+            {'hp': 30, 'damage': 6, 'heal': 8},
+            {'hp': 40, 'damage': 8, 'heal': 6},
+            {'hp': 55, 'damage': 12, 'heal': 10},
+        ]
+        # Place enemies at distinct positions
+        positions = [
+            (1, 1),
+            (self.grid_width - 2, 2),
+            (3, self.grid_height - 3)
+        ]
+        for i in range(3):
+            ex, ey = positions[i]
+            # movement direction - grid steps
+            dx = random.choice([-1, 0, 1])
+            dy = random.choice([-1, 0, 1])
+            # ensure not (0,0)
+            if dx == 0 and dy == 0:
+                dx = 1
+            tpl = enemy_templates[i]
+            self.enemies.append({
+                'x': ex,
+                'y': ey,
+                'dx': dx,
+                'dy': dy,
+                'hp': tpl['hp'],
+                'damage': tpl['damage'],
+                'heal': tpl['heal'],
+                'move_timer': random.randint(6, 18)  # frames until move
+            })
+
+    def update(self):
+        # Update enemies movement
+        for e in self.enemies:
+            e['move_timer'] -= 1
+            if e['move_timer'] <= 0:
+                # attempt move
+                new_x = e['x'] + e['dx']
+                new_y = e['y'] + e['dy']
+                # if out of bounds, pick a new direction
+                if new_x < 0 or new_x >= self.grid_width or new_y < 0 or new_y >= self.grid_height:
+                    e['dx'] = random.choice([-1, 0, 1])
+                    e['dy'] = random.choice([-1, 0, 1])
+                    if e['dx'] == 0 and e['dy'] == 0:
+                        e['dx'] = 1
+                    e['move_timer'] = random.randint(6, 18)
+                else:
+                    e['x'] = new_x
+                    e['y'] = new_y
+                    # occasionally change direction
+                    if random.random() < 0.25:
+                        e['dx'] = random.choice([-1, 0, 1])
+                        e['dy'] = random.choice([-1, 0, 1])
+                        if e['dx'] == 0 and e['dy'] == 0:
+                            e['dx'] = 1
+                    e['move_timer'] = random.randint(6, 18)
+
+        # Check for collisions (player steps onto an enemy)
+        for e in self.enemies:
+            if e['x'] == self.player_x and e['y'] == self.player_y:
+                # start battle with this enemy's stats
+                self.soundtrack.stop()
+                # pass a reference to this GameScreen and the enemy index so BattleScreen
+                # can remove the enemy when defeated and return to the map
+                enemy_index = self.enemies.index(e)
+                self.manager.go_to(BattleScreen(
+                    self.manager,
+                    player_health=50,
+                    player_damage=20,
+                    player_heal=15,
+                    enemy_health=e['hp'],
+                    enemy_damage=e['damage'],
+                    enemy_heal=e['heal'],
+                    is_boss=(e['hp'] > 50),
+                    origin_screen=self,
+                    origin_enemy_index=enemy_index
+                ))
+                return
+
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and self.can_move:
+            # Arrow key movement
+            if event.key == pygame.K_UP:
+                if self.player_y > 0:
+                    self.player_y -= 1
+            elif event.key == pygame.K_DOWN:
+                if self.player_y < self.grid_height - 1:
+                    self.player_y += 1
+            elif event.key == pygame.K_LEFT:
+                if self.player_x > 0:
+                    self.player_x -= 1
+            elif event.key == pygame.K_RIGHT:
+                if self.player_x < self.grid_width - 1:
+                    self.player_x += 1
+            
+            # ESC to return to main menu
+            if event.key == pygame.K_ESCAPE:
+                self.soundtrack.stop()
+                self.manager.go_to(MainMenuScreen(self.manager))
+
+    def draw(self, surface):
+        surface.fill(BLUE)
+        
+        # Draw grid
+        for x in range(0, WIDTH, self.grid_size):
+            pygame.draw.line(surface, BLACK, (x, 0), (x, HEIGHT), 1)
+        for y in range(0, HEIGHT, self.grid_size):
+            pygame.draw.line(surface, BLACK, (0, y), (WIDTH, y), 1)
+        
+        # Draw enemy squares (red) on the grid
+        for e in self.enemies:
+            ex_screen = e['x'] * self.grid_size
+            ey_screen = e['y'] * self.grid_size
+            er = pygame.Rect(ex_screen + 4, ey_screen + 4, self.grid_size - 8, self.grid_size - 8)
+            pygame.draw.rect(surface, (200, 40, 40), er)
+            # small hp label
+            hp_text = font_verysmall.render(str(e['hp']), True, WHITE)
+            surface.blit(hp_text, (ex_screen + 6, ey_screen + 6))
+
+        # Draw player character (as a square)
+        player_screen_x = self.player_x * self.grid_size
+        player_screen_y = self.player_y * self.grid_size
+        player_rect = pygame.Rect(player_screen_x + 2, player_screen_y + 2, 
+                                  self.grid_size - 4, self.grid_size - 4)
+        pygame.draw.rect(surface, self.player_color, player_rect)
+        
+        # Draw instructions
+        info = font_verysmall.render("Use arrow keys to move - ESC to return to menu", True, WHITE)
+        surface.blit(info, (10, 10))
+
+
+# Button class for UI
+class Button:
+    def __init__(self, x, y, width, height, text, color, text_color):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.color = color
+        self.text_color = text_color
+        self.hovered = False
+    
+    def is_clicked(self, pos):
+        return self.rect.collidepoint(pos)
+    
+    def update(self, pos):
+        self.hovered = self.rect.collidepoint(pos)
+    
+    def draw(self, surface, font):
+        color = tuple(min(c + 50, 255) for c in self.color) if self.hovered else self.color
+        pygame.draw.rect(surface, color, self.rect)
+        pygame.draw.rect(surface, WHITE, self.rect, 2)
+        text_surface = font.render(self.text, True, self.text_color)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        surface.blit(text_surface, text_rect)
+
+
+# Battle Screen
+class BattleScreen(Screen):
+    def __init__(self, manager, player_health=50, player_damage=20, player_heal=15,
+                 enemy_health=50, enemy_damage=6, enemy_heal=12, is_boss=False,
+                 origin_screen=None, origin_enemy_index=None):
+        super().__init__(manager)
+
+        if is_boss:
+            self.soundtrack = play_mp3("royalty_free_music/Palismanto_Boss.mp3", volume=80)
+        else:
+            self.soundtrack = play_mp3("royalty_free_music/Palismanto_Battle.mp3", volume=80)
+        
+        # Customizable stats
+        self.player_max_health = player_health
+        self.enemy_max_health = enemy_health
+        self.player_damage = player_damage
+        self.player_heal_amount = player_heal
+        self.enemy_damage = enemy_damage
+        self.enemy_heal_amount = enemy_heal
+        
+        # Current health
+        self.player_health = player_health
+        self.enemy_health = enemy_health
+        
+        # Battle state
+        self.player_turn = True
+        self.battle_log = "Battle Start! Choose your action."
+        self.action_timer = 0
+        self.battle_over = False
+        self.winner = None
+        # Optional origin info: where to return and which enemy to remove on victory
+        self.origin_screen = origin_screen
+        self.origin_enemy_index = origin_enemy_index
+
+        # Create buttons for player actions
+        button_width = 150
+        button_height = 50
+        button_y = HEIGHT - 100
+        self.attack_button = Button(50, button_y, button_width, button_height, "ATTACK", GREEN, BLACK)
+        self.heal_button = Button(250, button_y, button_width, button_height, "HEAL", (100, 100, 200), BLACK)
+        self.buttons = [self.attack_button, self.heal_button]
+    
+    def enemy_turn(self):
+        """Enemy decides to attack or heal"""
+        import random
+        if self.enemy_health < self.enemy_max_health * 0.4:
+            # Heal if low on health
+            self.perform_enemy_heal()
+        else:
+            # Attack by default
+            self.perform_enemy_attack()
+    
+    def perform_player_attack(self):
+        """Player attacks enemy"""
+        self.enemy_health -= self.player_damage
+        self.battle_log = f"You attacked! Enemy took {self.player_damage} damage!"
+        self.action_timer = 180  # Display for 3 seconds
+        self.check_battle_end()
+        self.player_turn = False
+    
+    def perform_player_heal(self):
+        """Player heals themselves"""
+        self.player_health = min(self.player_health + self.player_heal_amount, self.player_max_health)
+        self.battle_log = f"You healed for {self.player_heal_amount} HP!"
+        self.action_timer = 180
+        self.player_turn = False
+    
+    def perform_enemy_attack(self):
+        """Enemy attacks player"""
+        self.player_health -= self.enemy_damage
+        self.battle_log = f"Enemy attacked! You took {self.enemy_damage} damage!"
+        self.action_timer = 180
+        self.check_battle_end()
+        self.player_turn = True
+    
+    def perform_enemy_heal(self):
+        """Enemy heals themselves"""
+        self.enemy_health = min(self.enemy_health + self.enemy_heal_amount, self.enemy_max_health)
+        self.battle_log = f"Enemy healed for {self.enemy_heal_amount} HP!"
+        self.action_timer = 180
+        self.player_turn = True
+    
+    def check_battle_end(self):
+        """Check if battle is over"""
+        if self.player_health <= 0:
+            self.battle_over = True
+            self.winner = "Enemy"
+            self.battle_log = "You have been defeated! Press ESC to return."
+        elif self.enemy_health <= 0:
+            self.battle_over = True
+            self.winner = "Player"
+            self.battle_log = "Victory! You defeated the enemy! Returning to map..."
+            # If we have an origin map and enemy index, remove the enemy and return
+            if self.origin_screen is not None and self.origin_enemy_index is not None:
+                try:
+                    # get the enemy position so we can place the player there
+                    enemy_obj = self.origin_screen.enemies[self.origin_enemy_index]
+                    enemy_pos_x = enemy_obj['x']
+                    enemy_pos_y = enemy_obj['y']
+                    # remove the enemy from the map
+                    del self.origin_screen.enemies[self.origin_enemy_index]
+                    # resume the map soundtrack and return
+                    # place the player at the enemy's former position
+                    self.origin_screen.player_x = enemy_pos_x
+                    self.origin_screen.player_y = enemy_pos_y
+                    self.soundtrack.stop()
+                    self.origin_screen.soundtrack = play_mp3("royalty_free_music/Palismanto_Adventure.mp3", volume=80)
+                    # switch back to the origin screen
+                    self.manager.go_to(self.origin_screen)
+                except Exception:
+                    # If any error occurs, just update the message and let user press ESC
+                    self.battle_log = "Victory! Press ESC to return."
+
+    def update(self):
+        if self.action_timer > 0:
+            self.action_timer -= 1
+        
+        # Enemy turn after action timer expires
+        if self.action_timer == 0 and not self.player_turn and not self.battle_over:
+            self.enemy_turn()
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            for button in self.buttons:
+                button.update(event.pos)
+        
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                if self.player_turn and not self.battle_over:
+                    if self.attack_button.is_clicked(event.pos):
+                        self.perform_player_attack()
+                    elif self.heal_button.is_clicked(event.pos):
+                        self.perform_player_heal()
+        
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.manager.go_to(MainMenuScreen(self.manager))
+                self.soundtrack.stop()
+            
+            # Keyboard shortcuts
+            if self.player_turn and not self.battle_over:
+                if event.key == pygame.K_a:
+                    self.perform_player_attack()
+                elif event.key == pygame.K_h:
+                    self.perform_player_heal()
+
+    def draw(self, surface):
+        surface.fill(BLACK)
+        
+        # Draw title
+        title = font_small.render("BATTLE", True, WHITE)
+        surface.blit(title, (WIDTH // 2 - title.get_width() // 2, 20))
+        
+        # Draw player section
+        player_label = font_verysmall.render("YOU", True, WHITE)
+        surface.blit(player_label, (50, 80))
+        
+        # Draw player health bar
+        health_bar_width = 150
+        health_bar_height = 20
+        health_bar_x = 50
+        health_bar_y = 110
+        
+        # Background
+        pygame.draw.rect(surface, (100, 0, 0), (health_bar_x, health_bar_y, health_bar_width, health_bar_height))
+        # Health
+        health_ratio = self.player_health / self.player_max_health
+        pygame.draw.rect(surface, (0, 200, 0), (health_bar_x, health_bar_y, health_bar_width * health_ratio, health_bar_height))
+        pygame.draw.rect(surface, WHITE, (health_bar_x, health_bar_y, health_bar_width, health_bar_height), 2)
+        
+        # Health text
+        health_text = font_verysmall.render(f"{self.player_health}/{self.player_max_health}", True, WHITE)
+        surface.blit(health_text, (health_bar_x + 55, health_bar_y + 2))
+        
+        # Draw player stats
+        player_stats = font_verysmall.render(f"DMG: {self.player_damage} | HEAL: {self.player_heal_amount}", True, WHITE)
+        surface.blit(player_stats, (50, 140))
+        
+        # Draw enemy section
+        enemy_label = font_verysmall.render("ENEMY", True, WHITE)
+        surface.blit(enemy_label, (WIDTH - 200, 80))
+        
+        # Draw enemy health bar
+        health_bar_x = WIDTH - 200
+        pygame.draw.rect(surface, (100, 0, 0), (health_bar_x, health_bar_y, health_bar_width, health_bar_height))
+        health_ratio = self.enemy_health / self.enemy_max_health
+        pygame.draw.rect(surface, (0, 200, 0), (health_bar_x, health_bar_y, health_bar_width * health_ratio, health_bar_height))
+        pygame.draw.rect(surface, WHITE, (health_bar_x, health_bar_y, health_bar_width, health_bar_height), 2)
+        
+        # Health text
+        health_text = font_verysmall.render(f"{self.enemy_health}/{self.enemy_max_health}", True, WHITE)
+        surface.blit(health_text, (health_bar_x + 55, health_bar_y + 2))
+        
+        # Draw enemy stats
+        enemy_stats = font_verysmall.render(f"DMG: {self.enemy_damage} | HEAL: {self.enemy_heal_amount}", True, WHITE)
+        surface.blit(enemy_stats, (WIDTH - 200, 140))
+        
+        # Draw battle log
+        log_text = font_verysmall.render(self.battle_log, True, WHITE)
+        surface.blit(log_text, (WIDTH // 2 - log_text.get_width() // 2, HEIGHT // 2 - 50))
+        
+        # Draw turn indicator
+        if not self.battle_over:
+            if self.player_turn:
+                turn_text = font_verysmall.render("YOUR TURN", True, (0, 255, 0))
+            else:
+                turn_text = font_verysmall.render("ENEMY'S TURN", True, (255, 0, 0))
+            surface.blit(turn_text, (WIDTH // 2 - turn_text.get_width() // 2, HEIGHT // 2 + 30))
+        
+        # Draw buttons if it's player's turn
+        if self.player_turn and not self.battle_over:
+            self.attack_button.draw(surface, font_small)
+            self.heal_button.draw(surface, font_small)
+            
+            # Draw keyboard shortcuts hint
+            hint = font_verysmall.render("(A) Attack | (H) Heal | Click or Press Keys", True, WHITE)
+            surface.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 30))
+        
+        # Draw exit hint
+        if self.battle_over:
+            exit_text = font_verysmall.render("Press ESC to return to menu", True, WHITE)
+            surface.blit(exit_text, (WIDTH // 2 - exit_text.get_width() // 2, HEIGHT - 30))
+
+
 # Screen Manager
 class ScreenManager:
     def __init__(self):
@@ -207,15 +615,17 @@ class ScreenManager:
 # Function to play mp3 
 def play_mp3(file_path, volume=100):
     """
-    Plays an MP3 file in a non-blocking loop using VLC.
+    Plays an MP3 file in a non-blocking infinite loop using VLC.
+    The music will automatically restart when it finishes.
     
     - file_path (str): Path to the MP3 file
     - volume (int): Volume (0–100)
     
     Returns player (vlc.MediaPlayer), the VLC player object, so you can stop it later
     """
-    # Create VLC instance
+    # Create VLC instance with infinite looping enabled
     instance = vlc.Instance("--input-repeat=-1")  # -1 = infinite loop
+    instance.vlm_set_loop(file_path, True)
     player = instance.media_player_new()
 
     # Load file and set up
@@ -223,7 +633,7 @@ def play_mp3(file_path, volume=100):
     player.set_media(media)
     player.audio_set_volume(volume)
 
-    # Play the music (non-blocking)
+    # Play the music in a non-blocking infinite loop
     player.play()
 
     return player
