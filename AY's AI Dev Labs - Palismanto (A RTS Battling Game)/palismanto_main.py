@@ -10,7 +10,7 @@ from screens.screens import ScreenManager
 # Screen setup
 WIDTH, HEIGHT = 640, 480
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption('Palismanto: A D&D-Inspired RTS Battling Game')
+pygame.display.set_caption('Palismanto: A D&D-Inspired Battle Survival Game')
 pygame.mouse.set_visible(False)
 
 

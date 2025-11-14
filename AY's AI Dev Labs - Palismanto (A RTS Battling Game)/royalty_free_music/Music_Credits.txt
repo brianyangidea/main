@@ -6,10 +6,11 @@ Palismanto_Menu.mp3: 8 Bit Menu - by David Renda
 Palismanto_Adventure.mp3: Retro Forest - by David Fesliyan
 Palismanto_Battle.mp3: Funny Bit - by David Renda
 Palismanto_Boss.mp3: Boss Time - by David Renda
+Palismanto_Game_Over.mp3: 8 Bit Nostalgia - by David Renda
 
 Sourced From:
  - https://www.fesliyanstudios.com/royalty-free-music/downloads-c/8-bit-music/6
 
 
 Notes:
-- All music is royalty-free!
+- All music is royalty-free! But please give credit!

@@ -47,6 +47,9 @@ class Screen:
 
 # Title Screen
 class TitleScreen(Screen):
+    # Class variable to track the longest survival time across all games
+    longest_survival_frames = 0
+    
     def __init__(self, manager):
         super().__init__(manager)
         self.button_rect = pygame.Rect(WIDTH // 2 - 100, HEIGHT // 2, 200, 50)
@@ -118,7 +121,7 @@ class TitleScreen(Screen):
         for s in self.squares:
             pygame.draw.rect(surface, s['color'],
                              (int(s['pos'][0]), int(s['pos'][1]), s['size'], s['size']))
-        title_text = font_large.render("Palismanto: The RTS Battling Game", True, BLACK)
+        title_text = font_large.render("Palismanto: The Battle Survival Game", True, BLACK)
         surface.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 3))
 
         # Draw button
@@ -128,14 +131,29 @@ class TitleScreen(Screen):
         button_text = font_small.render("Start Game", True, WHITE)
         surface.blit(button_text, (self.button_rect.centerx - button_text.get_width() // 2,
                                    self.button_rect.centery - button_text.get_height() // 2))
+        
+        # Draw longest survival time below the button
+        if TitleScreen.longest_survival_frames > 0:
+            total_seconds = TitleScreen.longest_survival_frames // 60
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+            survival_text = font_verysmall.render(f"Your Longest Survival Time: {minutes}:{seconds:02d}", True, BLACK)
+        else:
+            survival_text = font_verysmall.render("Your Longest Survival Time: 0:00", True, BLACK)
+        surface.blit(survival_text, (self.button_rect.centerx - survival_text.get_width() // 2,
+                                     self.button_rect.bottom + 40))
     # (squares already drawn behind UI)
 
 
 # Main Menu Screen
 class MainMenuScreen(Screen):
-    def __init__(self, manager):
+    def __init__(self, manager, soundtrack=None):
         super().__init__(manager)
-        self.soundtrack = play_mp3("royalty_free_music/Palismanto_Menu.mp3", volume=80)
+        # Use passed soundtrack if available, otherwise create a new one
+        if soundtrack is not None:
+            self.soundtrack = soundtrack
+        else:
+            self.soundtrack = play_mp3("royalty_free_music/Palismanto_Menu.mp3", volume=80)
 
         # Animated bars at the bottom
         self.bar_count = 8
@@ -162,8 +180,8 @@ class MainMenuScreen(Screen):
             self.manager.go_to(GameScreen(self.manager))  # Go to the game screen
             self.soundtrack.stop()
         if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            self.manager.go_to(BattleScreen(self.manager))  # Go to the battle screen
-            self.soundtrack.stop()
+            self.manager.go_to(InstructionScreen(self.manager, self.soundtrack))  # Go to instructions, pass music
+            # Don't stop the soundtrack - it will continue playing
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.manager.go_to(TitleScreen(self.manager))  # Go back to title
             self.soundtrack.stop()
@@ -180,7 +198,7 @@ class MainMenuScreen(Screen):
         info = font_verysmall.render("Press ENTER to start the adventure!", True, WHITE)
         surface.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 6 + 100))
 
-        info = font_verysmall.render("Press SPACE to test out the battle feature?", True, WHITE)
+        info = font_verysmall.render("Press SPACE to see the instructions?", True, WHITE)
         surface.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 6 + 150))
 
         info = font_verysmall.render("Or press ESC to return...", True, WHITE)
@@ -197,6 +215,57 @@ class MainMenuScreen(Screen):
             y = HEIGHT - bottom_margin - height
             rect = pygame.Rect(x, y, self.bar_width, height)
             pygame.draw.rect(surface, bar['color'], rect)
+
+
+class InstructionScreen(Screen):
+    def __init__(self, manager, soundtrack=None):
+        super().__init__(manager)
+        self.soundtrack = soundtrack  # Use the passed soundtrack (from MainMenuScreen)
+
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.manager.go_to(MainMenuScreen(self.manager, self.soundtrack))
+            # Don't stop the soundtrack - it will continue playing
+
+    def update(self):
+        pass
+
+    def draw(self, surface):
+        surface.fill(GREEN)
+        
+        # Title
+        title_text = font_large.render("Game Instructions", True, WHITE)
+        surface.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, 20))
+        
+        # Instructions text
+        instructions = [
+            "YOUR ADVENTURE:",
+            "- Use arrow keys to move around the grid",
+            "- Dodge enemies to avoid battles",
+            "- Collect green healing pickups",
+            "- The game gets more difficult over time",
+            "- Survive for as long as you can!",
+            "",
+            "DURING BATTLE:",
+            "- Click buttons or press keys (A/H/P) to act",
+            "- Attack: Deal damage to the enemy",
+            "- Heal: Restore your health (only 3 uses)",
+            "- Plead: Beg for sweet mercy (rarely works!)",
+            "- There's no reward for victory, this is a survival game!",
+            "",
+            "Press ESC to return to the menu"
+        ]
+        
+        # Draw each line of instructions
+        y_offset = 80
+        line_height = 28
+        for line in instructions:
+            if line == "":  # Empty line for spacing
+                y_offset += line_height // 2
+            else:
+                text_surface = font_verysmall.render(line, True, WHITE)
+                surface.blit(text_surface, (30, y_offset))
+                y_offset += line_height
 
 
 # Game Screen
@@ -222,6 +291,10 @@ class GameScreen(Screen):
         
         # Movement tracking (for smooth grid-based movement)
         self.can_move = True
+        
+        # Survival timer (in frames, converted to time display)
+        self.survival_frames = 0
+        self.in_battle = False
 
         # Enemies: three red squares with their own stats
         # Each enemy uses grid coords (x,y) and moves every few frames
@@ -356,6 +429,10 @@ class GameScreen(Screen):
         # couldn't find a spot this tick
 
     def update(self):
+        # Increment survival timer only when not in battle
+        if not self.in_battle:
+            self.survival_frames += 1
+        
         # Update enemies movement
         for e in self.enemies:
             e['move_timer'] -= 1
@@ -385,6 +462,7 @@ class GameScreen(Screen):
         for e in self.enemies:
             if e['x'] == self.player_x and e['y'] == self.player_y:
                 # start battle with this enemy's stats
+                self.in_battle = True  # Pause the timer
                 self.soundtrack.stop()
                 # pass a reference to this GameScreen and the enemy index so BattleScreen
                 # can remove the enemy when defeated and return to the map
@@ -497,7 +575,7 @@ class GameScreen(Screen):
             name_text = font_supersmall.render(str(e['name']), True, WHITE)
             
             # Changes box colours for boss enemies because they are awesome!
-            if str(e['name']) is "Boss":
+            if str(e['name']) == "Boss":
                 pygame.draw.rect(surface, (200, 40, 40), er)
             else:
                 pygame.draw.rect(surface, (100, 100, 40), er)
@@ -523,6 +601,17 @@ class GameScreen(Screen):
         # Draw instructions
         info = font_verysmall.render("Use arrow keys to move - ESC to return to menu", True, WHITE)
         surface.blit(info, (10, 10))
+        
+        # Draw survival timer in top right
+        try:
+            # Convert frames to minutes and seconds (assuming 60 FPS)
+            total_seconds = self.survival_frames // 60
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+            timer_text = font_verysmall.render(f"You Survived: {minutes}:{seconds:02d}", True, WHITE)
+            surface.blit(timer_text, (WIDTH - timer_text.get_width() - 10, 10))
+        except Exception:
+            pass
         
         # Draw player health bar on the map (top-left)
         try:
@@ -680,11 +769,18 @@ class BattleScreen(Screen):
             self.battle_over = True
             self.winner = "Enemy"
             self.battle_log = f"{self.player_name} has been defeated! Press ESC to return."
+            # Stop the music when player dies
+            self.soundtrack.stop()
+            self.soundtrack = play_mp3("royalty_free_music/Palismanto_Game_Over.mp3", volume=80)
             # Persist player health back to origin screen if provided
             if self.origin_screen is not None:
                 try:
                     # Player is at 0 or less
                     self.origin_screen.player_health = max(0, self.player_health)
+                    # Update longest survival time if this was a new record
+                    if hasattr(self.origin_screen, 'survival_frames'):
+                        if self.origin_screen.survival_frames > TitleScreen.longest_survival_frames:
+                            TitleScreen.longest_survival_frames = self.origin_screen.survival_frames
                 except Exception:
                     pass
         elif self.enemy_health <= 0:
@@ -710,6 +806,9 @@ class BattleScreen(Screen):
                         # also update max if needed
                         if hasattr(self.origin_screen, 'player_max_health'):
                             self.origin_screen.player_max_health = self.player_max_health
+                        # Resume the timer when returning from battle
+                        if hasattr(self.origin_screen, 'in_battle'):
+                            self.origin_screen.in_battle = False
                     except Exception:
                         pass
                     self.soundtrack.stop()
@@ -834,6 +933,19 @@ class BattleScreen(Screen):
         if self.battle_over:
             exit_text = font_verysmall.render("Press ESC to return to menu", True, WHITE)
             surface.blit(exit_text, (WIDTH // 2 - exit_text.get_width() // 2, HEIGHT - 30))
+            
+            # If player was defeated, show survival time
+            if self.winner == "Enemy" and self.origin_screen is not None:
+                try:
+                    # Get survival time from origin screen
+                    if hasattr(self.origin_screen, 'survival_frames'):
+                        total_seconds = self.origin_screen.survival_frames // 60
+                        minutes = total_seconds // 60
+                        seconds = total_seconds % 60
+                        survival_text = font_small.render(f"You Survived: {minutes}:{seconds:02d}", True, WHITE)
+                        surface.blit(survival_text, (WIDTH // 2 - survival_text.get_width() // 2, HEIGHT // 2 + 80))
+                except Exception:
+                    pass
 
 
 # Screen Manager
