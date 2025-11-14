@@ -1,7 +1,12 @@
 # Colors
 import pygame
 import sys
-import vlc
+try:
+    import vlc  # type: ignore
+    _VLC_AVAILABLE = True
+except Exception:
+    vlc = None
+    _VLC_AVAILABLE = False
 import time
 import random
 import math
@@ -10,7 +15,7 @@ import math
 pygame.init()
 
 # Screen setup
-WIDTH, HEIGHT = 640, 500
+WIDTH, HEIGHT = 640, 480
 
 # Colours
 WHITE = (255, 255, 255)
@@ -112,7 +117,7 @@ class TitleScreen(Screen):
         for s in self.squares:
             pygame.draw.rect(surface, s['color'],
                              (int(s['pos'][0]), int(s['pos'][1]), s['size'], s['size']))
-        title_text = font_large.render("Palismanto: The Card Battling Game", True, BLACK)
+        title_text = font_large.render("Palismanto: The RTS Battling Game", True, BLACK)
         surface.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 3))
 
         # Draw button
@@ -208,6 +213,8 @@ class GameScreen(Screen):
         self.player_x = self.grid_width // 2  # Start in center (grid coordinates)
         self.player_y = self.grid_height // 2
         self.player_color = (0, 100, 255)
+        # Customizable player name
+        self.player_name = "Hero"
         
         # Movement tracking (for smooth grid-based movement)
         self.can_move = True
@@ -217,9 +224,9 @@ class GameScreen(Screen):
         self.enemies = []
         # Example per-enemy stats (health, damage, heal). Tweak as desired.
         enemy_templates = [
-            {'hp': 30, 'damage': 6, 'heal': 8},
-            {'hp': 40, 'damage': 8, 'heal': 6},
-            {'hp': 55, 'damage': 12, 'heal': 10},
+            {'name': 'Imp', 'hp': 30, 'damage': 6, 'heal': 8},
+            {'name': 'Orc', 'hp': 40, 'damage': 8, 'heal': 6},
+            {'name': 'Goliath', 'hp': 55, 'damage': 12, 'heal': 10},
         ]
         # Place enemies at distinct positions
         positions = [
@@ -241,11 +248,64 @@ class GameScreen(Screen):
                 'y': ey,
                 'dx': dx,
                 'dy': dy,
+                'name': tpl.get('name', f'Enemy{i+1}'),
                 'hp': tpl['hp'],
                 'damage': tpl['damage'],
                 'heal': tpl['heal'],
                 'move_timer': random.randint(6, 18)  # frames until move
             })
+
+        # Keep templates and spawn timing on the screen for dynamic spawning
+        self.enemy_templates = enemy_templates
+        self.spawn_timer = 0
+        self.spawn_interval = 600  # frames between spawn attempts (~10s at 60fps)
+        self.max_enemies = 8  # cap total enemies on the map
+
+    def spawn_enemy(self):
+        """Attempt to spawn a new enemy at a random free grid tile."""
+        if len(self.enemies) >= self.max_enemies:
+            return
+
+        # Choose a random template
+        tpl = random.choice(self.enemy_templates)
+
+        # Try to find a free position (avoid player and existing enemies)
+        attempts = 0
+        while attempts < 50:
+            rx = random.randint(0, self.grid_width - 1)
+            ry = random.randint(0, self.grid_height - 1)
+            # avoid spawning on player
+            if rx == self.player_x and ry == self.player_y:
+                attempts += 1
+                continue
+            collision = False
+            for e in self.enemies:
+                if e['x'] == rx and e['y'] == ry:
+                    collision = True
+                    break
+            if collision:
+                attempts += 1
+                continue
+
+            # Place enemy
+            dx = random.choice([-1, 0, 1])
+            dy = random.choice([-1, 0, 1])
+            if dx == 0 and dy == 0:
+                dx = 1
+            new_enemy = {
+                'x': rx,
+                'y': ry,
+                'dx': dx,
+                'dy': dy,
+                'name': tpl.get('name', 'Enemy'),
+                'hp': tpl['hp'],
+                'damage': tpl['damage'],
+                'heal': tpl['heal'],
+                'move_timer': random.randint(6, 18)
+            }
+            self.enemies.append(new_enemy)
+            return
+        # if we exit loop, couldn't find a spot this tick; just skip
 
     def update(self):
         # Update enemies movement
@@ -291,9 +351,19 @@ class GameScreen(Screen):
                     enemy_heal=e['heal'],
                     is_boss=(e['hp'] > 50),
                     origin_screen=self,
-                    origin_enemy_index=enemy_index
+                    origin_enemy_index=enemy_index,
+                    player_name=self.player_name,
+                    enemy_name=e['name']
                 ))
                 return
+
+        # Handle timed spawning of additional enemies
+        if self.spawn_timer <= 0:
+            # Attempt to spawn and reset timer
+            self.spawn_enemy()
+            self.spawn_timer = self.spawn_interval
+        else:
+            self.spawn_timer -= 1
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and self.can_move:
@@ -375,7 +445,7 @@ class Button:
 class BattleScreen(Screen):
     def __init__(self, manager, player_health=50, player_damage=20, player_heal=15,
                  enemy_health=50, enemy_damage=6, enemy_heal=12, is_boss=False,
-                 origin_screen=None, origin_enemy_index=None):
+                 origin_screen=None, origin_enemy_index=None, player_name=None, enemy_name=None):
         super().__init__(manager)
 
         if is_boss:
@@ -390,6 +460,9 @@ class BattleScreen(Screen):
         self.player_heal_amount = player_heal
         self.enemy_damage = enemy_damage
         self.enemy_heal_amount = enemy_heal
+        # Names
+        self.player_name = player_name if player_name is not None else "Player"
+        self.enemy_name = enemy_name if enemy_name is not None else "Enemy"
         
         # Current health
         self.player_health = player_health
@@ -458,11 +531,11 @@ class BattleScreen(Screen):
         if self.player_health <= 0:
             self.battle_over = True
             self.winner = "Enemy"
-            self.battle_log = "You have been defeated! Press ESC to return."
+            self.battle_log = f"{self.player_name} has been defeated! Press ESC to return."
         elif self.enemy_health <= 0:
             self.battle_over = True
             self.winner = "Player"
-            self.battle_log = "Victory! You defeated the enemy! Returning to map..."
+            self.battle_log = f"Victory! You defeated {self.enemy_name}! Returning to map..."
             # If we have an origin map and enemy index, remove the enemy and return
             if self.origin_screen is not None and self.origin_enemy_index is not None:
                 try:
@@ -623,15 +696,35 @@ def play_mp3(file_path, volume=100):
     
     Returns player (vlc.MediaPlayer), the VLC player object, so you can stop it later
     """
+    # If vlc is not available, return a dummy object with a stop() method
+    if not _VLC_AVAILABLE:
+        class DummyPlayer:
+            def play(self):
+                print(f"[INFO] vlc not available - would play: {file_path}")
+
+            def stop(self):
+                print(f"[INFO] vlc not available - stop called for: {file_path}")
+
+        dp = DummyPlayer()
+        dp.play()
+        return dp
+
     # Create VLC instance with infinite looping enabled
     instance = vlc.Instance("--input-repeat=-1")  # -1 = infinite loop
-    instance.vlm_set_loop(file_path, True)
+    try:
+        # Some vlc builds don't expose vlc.Instance.vlm_set_loop; guard it
+        instance.vlm_set_loop(file_path, True)
+    except Exception:
+        pass
     player = instance.media_player_new()
 
     # Load file and set up
     media = instance.media_new(file_path)
     player.set_media(media)
-    player.audio_set_volume(volume)
+    try:
+        player.audio_set_volume(volume)
+    except Exception:
+        pass
 
     # Play the music in a non-blocking infinite loop
     player.play()
