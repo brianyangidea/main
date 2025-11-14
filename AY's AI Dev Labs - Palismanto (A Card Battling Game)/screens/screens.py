@@ -29,6 +29,7 @@ RED = "red"
 font_large = pygame.font.SysFont(None, 48)
 font_small = pygame.font.SysFont(None, 36)
 font_verysmall = pygame.font.SysFont(None, 24)
+font_supersmall = pygame.font.SysFont(None, 16)
 
 # Base Screen Class
 class Screen:
@@ -176,10 +177,10 @@ class MainMenuScreen(Screen):
         info = font_small.render("Make a selection:", True, WHITE)
         surface.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 6 + 50))
 
-        info = font_verysmall.render("Press ENTER to start!", True, WHITE)
+        info = font_verysmall.render("Press ENTER to start the adventure!", True, WHITE)
         surface.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 6 + 100))
 
-        info = font_verysmall.render("Press SPACE to adjust settings?", True, WHITE)
+        info = font_verysmall.render("Press SPACE to test out the battle feature?", True, WHITE)
         surface.blit(info, (WIDTH // 2 - info.get_width() // 2, HEIGHT // 6 + 150))
 
         info = font_verysmall.render("Or press ESC to return...", True, WHITE)
@@ -214,7 +215,7 @@ class GameScreen(Screen):
         self.player_y = self.grid_height // 2
         self.player_color = (0, 100, 255)
         # Customizable player name
-        self.player_name = "Hero"
+        self.player_name = "The Hero"
         
         # Movement tracking (for smooth grid-based movement)
         self.can_move = True
@@ -224,9 +225,10 @@ class GameScreen(Screen):
         self.enemies = []
         # Example per-enemy stats (health, damage, heal). Tweak as desired.
         enemy_templates = [
-            {'name': 'Imp', 'hp': 30, 'damage': 6, 'heal': 8},
-            {'name': 'Orc', 'hp': 40, 'damage': 8, 'heal': 6},
-            {'name': 'Goliath', 'hp': 55, 'damage': 12, 'heal': 10},
+            {'name': 'Imp', 'hp': 30, 'damage': 6, 'heal': 6},
+            {'name': 'Boss', 'hp': 55, 'damage': 15, 'heal': 10},
+            {'name': 'Peon', 'hp': 20, 'damage': 4, 'heal': 6},
+            {'name': 'Orc', 'hp': 40, 'damage': 8, 'heal': 8},
         ]
         # Place enemies at distinct positions
         positions = [
@@ -344,8 +346,8 @@ class GameScreen(Screen):
                 self.manager.go_to(BattleScreen(
                     self.manager,
                     player_health=50,
-                    player_damage=20,
-                    player_heal=15,
+                    player_damage=15,
+                    player_heal=10,
                     enemy_health=e['hp'],
                     enemy_damage=e['damage'],
                     enemy_heal=e['heal'],
@@ -400,10 +402,15 @@ class GameScreen(Screen):
             ex_screen = e['x'] * self.grid_size
             ey_screen = e['y'] * self.grid_size
             er = pygame.Rect(ex_screen + 4, ey_screen + 4, self.grid_size - 8, self.grid_size - 8)
-            pygame.draw.rect(surface, (200, 40, 40), er)
-            # small hp label
-            hp_text = font_verysmall.render(str(e['hp']), True, WHITE)
-            surface.blit(hp_text, (ex_screen + 6, ey_screen + 6))
+            # small name label
+            name_text = font_supersmall.render(str(e['name']), True, WHITE)
+            
+            # Changes box colours for boss enemies because they are awesome!
+            if str(e['name']) is "Boss":
+                pygame.draw.rect(surface, (200, 40, 40), er)
+            else:
+                pygame.draw.rect(surface, (100, 100, 40), er)
+            surface.blit(name_text, (ex_screen + 6, ey_screen + 6))
 
         # Draw player character (as a square)
         player_screen_x = self.player_x * self.grid_size
@@ -443,7 +450,7 @@ class Button:
 
 # Battle Screen
 class BattleScreen(Screen):
-    def __init__(self, manager, player_health=50, player_damage=20, player_heal=15,
+    def __init__(self, manager, player_health=50, player_damage=15, player_heal=10,
                  enemy_health=50, enemy_damage=6, enemy_heal=12, is_boss=False,
                  origin_screen=None, origin_enemy_index=None, player_name=None, enemy_name=None):
         super().__init__(manager)
@@ -482,9 +489,10 @@ class BattleScreen(Screen):
         button_width = 150
         button_height = 50
         button_y = HEIGHT - 100
-        self.attack_button = Button(50, button_y, button_width, button_height, "ATTACK", GREEN, BLACK)
-        self.heal_button = Button(250, button_y, button_width, button_height, "HEAL", (100, 100, 200), BLACK)
-        self.buttons = [self.attack_button, self.heal_button]
+        self.attack_button = Button(50, button_y, button_width, button_height, "ATTACK", (200, 50, 50), BLACK)
+        self.heal_button = Button(250, button_y, button_width, button_height, "HEAL", (50, 200, 100), BLACK)
+        self.plead_button = Button(450, button_y, button_width, button_height, "PLEAD", (200, 50, 200), BLACK)
+        self.buttons = [self.attack_button, self.heal_button, self.plead_button]
     
     def enemy_turn(self):
         """Enemy decides to attack or heal"""
@@ -508,6 +516,12 @@ class BattleScreen(Screen):
         """Player heals themselves"""
         self.player_health = min(self.player_health + self.player_heal_amount, self.player_max_health)
         self.battle_log = f"You healed for {self.player_heal_amount} HP!"
+        self.action_timer = 180
+        self.player_turn = False
+
+    def perform_player_plead(self):
+        """Player begs for mercy (funny)"""
+        self.battle_log = f"You begged for mercy! The {self.enemy_name} laughs."
         self.action_timer = 180
         self.player_turn = False
     
@@ -577,6 +591,8 @@ class BattleScreen(Screen):
                         self.perform_player_attack()
                     elif self.heal_button.is_clicked(event.pos):
                         self.perform_player_heal()
+                    elif self.plead_button.is_clicked(event.pos):
+                        self.perform_player_plead()
         
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -589,16 +605,18 @@ class BattleScreen(Screen):
                     self.perform_player_attack()
                 elif event.key == pygame.K_h:
                     self.perform_player_heal()
+                elif event.key == pygame.K_p:
+                    self.perform_player_plead()
 
     def draw(self, surface):
         surface.fill(BLACK)
         
         # Draw title
-        title = font_small.render("BATTLE", True, WHITE)
+        title = font_small.render("BATTLE!", True, WHITE)
         surface.blit(title, (WIDTH // 2 - title.get_width() // 2, 20))
         
         # Draw player section
-        player_label = font_verysmall.render("YOU", True, WHITE)
+        player_label = font_verysmall.render(self.player_name, True, WHITE)
         surface.blit(player_label, (50, 80))
         
         # Draw player health bar
@@ -623,7 +641,7 @@ class BattleScreen(Screen):
         surface.blit(player_stats, (50, 140))
         
         # Draw enemy section
-        enemy_label = font_verysmall.render("ENEMY", True, WHITE)
+        enemy_label = font_verysmall.render(self.enemy_name, True, WHITE)
         surface.blit(enemy_label, (WIDTH - 200, 80))
         
         # Draw enemy health bar
@@ -657,9 +675,10 @@ class BattleScreen(Screen):
         if self.player_turn and not self.battle_over:
             self.attack_button.draw(surface, font_small)
             self.heal_button.draw(surface, font_small)
+            self.plead_button.draw(surface, font_small)
             
             # Draw keyboard shortcuts hint
-            hint = font_verysmall.render("(A) Attack | (H) Heal | Click or Press Keys", True, WHITE)
+            hint = font_verysmall.render("(A) Attack | (H) Heal | (P) Plead | Click or Press Keys", True, WHITE)
             surface.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 30))
         
         # Draw exit hint
