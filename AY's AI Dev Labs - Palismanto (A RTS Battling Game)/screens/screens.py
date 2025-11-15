@@ -301,10 +301,10 @@ class GameScreen(Screen):
         self.enemies = []
         # Example per-enemy stats (health, damage, heal). Tweak as desired.
         enemy_templates = [
-            {'name': 'Imp', 'hp': 30, 'damage': 6, 'heal': 6},
+            {'name': 'Imp', 'hp': 30, 'damage': 8, 'heal': 6},
             {'name': 'Boss', 'hp': 55, 'damage': 15, 'heal': 10},
-            {'name': 'Peon', 'hp': 20, 'damage': 4, 'heal': 6},
-            {'name': 'Orc', 'hp': 40, 'damage': 8, 'heal': 8},
+            {'name': 'Peon', 'hp': 20, 'damage': 5, 'heal': 5},
+            {'name': 'Orc', 'hp': 40, 'damage': 10, 'heal': 8},
         ]
         # Place enemies at distinct positions
         positions = [
@@ -342,7 +342,7 @@ class GameScreen(Screen):
         # Single healing pickup that spawns periodically
         self.pickup = None  # dict with x,y,dx,dy,move_timer
         self.pickup_spawn_timer = 0
-        self.pickup_spawn_interval = 600  # ~5 seconds at 60fps
+        self.pickup_spawn_interval = 1200  # Heal spawn rate (Note: 60 fps)
         self.pickup_heal_amount = 5
 
     def spawn_enemy(self):
@@ -709,6 +709,39 @@ class BattleScreen(Screen):
         self.heal_button = Button(250, button_y, button_width, button_height, "HEAL", (50, 200, 100), BLACK)
         self.plead_button = Button(450, button_y, button_width, button_height, "PLEAD", (200, 50, 200), BLACK)
         self.buttons = [self.attack_button, self.heal_button, self.plead_button]
+        
+        # Dodge mini-game state
+        self.is_dodging = False
+        self.dodge_line_position = 0.0  # 0.0 to 1.0 across the bar
+        self.dodge_line_speed = 0.04  # Speed of line movement (pixels per frame)
+        self.dodge_line_direction = 1  # 1 for right, -1 for left
+        self.dodge_green_start = 0.3  # Start of green zone (0.0 to 1.0)
+        self.dodge_green_end = 0.7  # End of green zone (0.0 to 1.0)
+        self.dodge_timer = 0
+        self.dodge_max_time = 300  # how many frames to dodge
+        self.dodge_result = None  # "success", "failed", or None
+
+        # Dodge bar stats based on enemy
+        if enemy_name == "Boss":
+            # Boss enemy - Very small green zone, fast line
+            self.dodge_green_start = 0.45
+            self.dodge_green_end = 0.55
+            self.dodge_line_speed = 0.08
+        elif enemy_name == "Imp" or enemy_name == "Orc":
+            # For Imps and Orcs
+            self.dodge_green_start = 0.4
+            self.dodge_green_end = 0.6
+            self.dodge_line_speed = 0.06
+        elif enemy_name == "Peon":
+            # Weak enemy - larger green zone, slower line
+            self.dodge_green_start = 0.2
+            self.dodge_green_end = 0.8
+            self.dodge_line_speed = 0.02
+        else:
+            # Catch all for other enemies
+            self.dodge_green_start = 0.3
+            self.dodge_green_end = 0.7
+            self.dodge_line_speed = 0.04
     
     def enemy_turn(self):
         """Enemy decides to attack or heal"""
@@ -724,7 +757,7 @@ class BattleScreen(Screen):
         """Player attacks enemy"""
         self.enemy_health -= self.player_damage
         self.battle_log = f"You attacked! Enemy took {self.player_damage} damage!"
-        self.action_timer = 180  # Display for 3 seconds
+        self.action_timer = 180  # Display for X many frames
         self.check_battle_end()
         self.player_turn = False
     
@@ -743,18 +776,20 @@ class BattleScreen(Screen):
         self.player_turn = False
 
     def perform_player_plead(self):
-        """Player begs for mercy (funny)"""
+        """Player begs for mercy (this is purely a joke move hahaha))"""
         self.battle_log = f"You begged for mercy! The {self.enemy_name} laughs."
         self.action_timer = 180
         self.player_turn = False
     
     def perform_enemy_attack(self):
-        """Enemy attacks player"""
-        self.player_health -= self.enemy_damage
-        self.battle_log = f"Enemy attacked! You took {self.enemy_damage} damage!"
-        self.action_timer = 180
-        self.check_battle_end()
-        self.player_turn = True
+        """Enemy attacks player - triggers dodge mini-game"""
+        self.is_dodging = True
+        self.dodge_line_position = 0.0
+        self.dodge_line_direction = 1  # Reset direction to moving right
+        self.dodge_timer = 0
+        self.dodge_result = None
+        self.battle_log = f"The {self.enemy_name} is attacking! Press SPACE to dodge!"
+        self.action_timer = 0  # Don't use action timer during dodge
     
     def perform_enemy_heal(self):
         """Enemy heals themselves"""
@@ -820,11 +855,33 @@ class BattleScreen(Screen):
                     self.battle_log = "Victory! Press ESC to return."
 
     def update(self):
-        if self.action_timer > 0:
+        if self.is_dodging:
+            self.dodge_timer += 1
+            self.dodge_line_position += self.dodge_line_speed * self.dodge_line_direction
+            
+            # Bounce the line when it hits the edges
+            if self.dodge_line_position >= 1.0:
+                self.dodge_line_position = 1.0
+                self.dodge_line_direction = -1
+            elif self.dodge_line_position <= 0.0:
+                self.dodge_line_position = 0.0
+                self.dodge_line_direction = 1
+            
+            # If dodge timer expires without pressing space, player fails
+            if self.dodge_timer >= self.dodge_max_time:
+                if self.dodge_result is None:
+                    self.dodge_result = "failed"
+                    self.battle_log = f"You failed to dodge! You took {self.enemy_damage} damage!"
+                    self.player_health -= self.enemy_damage
+                    self.check_battle_end()
+                self.is_dodging = False
+                self.action_timer = 180
+                self.player_turn = True
+        elif self.action_timer > 0:
             self.action_timer -= 1
         
         # Enemy turn after action timer expires
-        if self.action_timer == 0 and not self.player_turn and not self.battle_over:
+        if self.action_timer == 0 and not self.player_turn and not self.battle_over and not self.is_dodging:
             self.enemy_turn()
 
     def handle_event(self, event):
@@ -834,7 +891,7 @@ class BattleScreen(Screen):
         
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
-                if self.player_turn and not self.battle_over:
+                if self.player_turn and not self.battle_over and not self.is_dodging:
                     if self.attack_button.is_clicked(event.pos):
                         self.perform_player_attack()
                     elif self.heal_button.is_clicked(event.pos):
@@ -847,8 +904,24 @@ class BattleScreen(Screen):
                 self.manager.go_to(MainMenuScreen(self.manager))
                 self.soundtrack.stop()
             
-            # Keyboard shortcuts
-            if self.player_turn and not self.battle_over:
+            # Handle space bar for dodge mini-game
+            if event.key == pygame.K_SPACE and self.is_dodging and self.dodge_result is None:
+                # Check if line is in the green zone
+                if self.dodge_green_start <= self.dodge_line_position <= self.dodge_green_end:
+                    self.dodge_result = "success"
+                    self.battle_log = "You dodged the attack!"
+                    self.action_timer = 180
+                else:
+                    self.dodge_result = "failed"
+                    self.battle_log = f"You failed to dodge! You took {self.enemy_damage} damage!"
+                    self.player_health -= self.enemy_damage
+                    self.check_battle_end()
+                    self.action_timer = 180
+                self.is_dodging = False
+                self.player_turn = True
+            
+            # Keyboard shortcuts for battle actions
+            if self.player_turn and not self.battle_over and not self.is_dodging:
                 if event.key == pygame.K_a:
                     self.perform_player_attack()
                 elif event.key == pygame.K_h:
@@ -911,13 +984,41 @@ class BattleScreen(Screen):
         log_text = font_verysmall.render(self.battle_log, True, WHITE)
         surface.blit(log_text, (WIDTH // 2 - log_text.get_width() // 2, HEIGHT // 2 - 50))
         
+        # Draw dodge mini-game bar if active
+        if self.is_dodging:
+            dodge_bar_width = 300
+            dodge_bar_height = 50
+            dodge_bar_x = (WIDTH - dodge_bar_width) // 2
+            dodge_bar_y = HEIGHT // 2 + 40
+            
+            # Draw background bar (red)
+            pygame.draw.rect(surface, (100, 0, 0), (dodge_bar_x, dodge_bar_y, dodge_bar_width, dodge_bar_height))
+            
+            # Draw green zone (safe area)
+            green_start_x = dodge_bar_x + (dodge_bar_width * self.dodge_green_start)
+            green_width = dodge_bar_width * (self.dodge_green_end - self.dodge_green_start)
+            pygame.draw.rect(surface, (0, 200, 0), (green_start_x, dodge_bar_y, green_width, dodge_bar_height))
+            
+            # Draw moving line
+            line_x = dodge_bar_x + (dodge_bar_width * self.dodge_line_position)
+            pygame.draw.line(surface, WHITE, (line_x, dodge_bar_y), (line_x, dodge_bar_y + dodge_bar_height), 3)
+            
+            # Draw border
+            pygame.draw.rect(surface, WHITE, (dodge_bar_x, dodge_bar_y, dodge_bar_width, dodge_bar_height), 2)
+            
+            # Draw instructions
+            dodge_hint = font_verysmall.render("Press SPACE when the line is in the green!", True, WHITE)
+            surface.blit(dodge_hint, (WIDTH // 2 - dodge_hint.get_width() // 2, dodge_bar_y - 25))
+        
         # Draw turn indicator
         if not self.battle_over:
-            if self.player_turn:
+            if self.player_turn and not self.is_dodging:
                 turn_text = font_verysmall.render("YOUR TURN", True, (0, 255, 0))
+            elif self.is_dodging:
+                turn_text = font_verysmall.render("DODGE THE ATTACK!", True, (255, 255, 0))
             else:
                 turn_text = font_verysmall.render("ENEMY'S TURN", True, (255, 0, 0))
-            surface.blit(turn_text, (WIDTH // 2 - turn_text.get_width() // 2, HEIGHT // 2 + 30))
+            surface.blit(turn_text, (WIDTH // 2 - turn_text.get_width() // 2, HEIGHT // 2 + 100))
         
         # Draw buttons if it's player's turn
         if self.player_turn and not self.battle_over:
